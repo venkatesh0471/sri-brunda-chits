@@ -1,0 +1,187 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sri Brunda Chits – Customer Manager</title>
+<link rel="stylesheet" href="{% static 'chits/style.css' %}">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo"><img src="{% static 'chits/image.png' %}" alt="Sri Brunda Chits"></span>
+    <div><b>Sri Brunda Chits</b><small>Together Towards Prosperity</small></div>
+  </div>
+  <div class="who"><span>Customer Management</span><span id="today"></span><button class="ghost sm" id="logout" style="margin-top:4px">Sign out</button></div>
+</header>
+
+<main>
+  <nav class="tabs">
+    <button class="tab on" data-tab="cust">Customers</button>
+    <button class="tab" data-tab="loan">Hand Loans</button>
+  </nav>
+
+  <div id="custView">
+  <div class="stats">
+    <div class="stat"><b id="sC">0</b><span>Customers</span></div>
+    <div class="stat"><b id="sA">0</b><span>Active</span></div>
+    <div class="stat"><b id="sV">₹0</b><span>Total chit value</span></div>
+    <div class="stat"><b id="sD">₹0</b><span>Total dues</span></div>
+  </div>
+
+  <div class="bar">
+    <input id="q" placeholder="Search name, phone, group…">
+    <select id="f">
+      <option value="">All status</option>
+      <option>Active</option><option>Defaulter</option><option>Completed</option>
+    </select>
+    <select id="g"><option value="">All groups</option></select>
+    <button class="gold" id="gbtn">👥 Groups</button>
+    <button class="gold" id="add">+ Add customer</button>
+    <button class="ghost" id="exp">Export CSV</button>
+    <button class="ghost" id="bak">Backup</button>
+    <button class="ghost" id="res">Restore</button>
+    <input type="file" id="file" accept=".json" hidden>
+  </div>
+
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th>S.No</th><th>Name</th><th>Phone</th><th>Group</th><th>Chit value</th>
+        <th>Monthly</th><th>Paid</th><th>Ends on</th><th>Due</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  </div><!-- /custView -->
+
+  <div id="loanView" hidden>
+    <div class="stats">
+      <div class="stat"><b id="lC">0</b><span>Hand loans (running)</span></div>
+      <div class="stat"><b id="lA">₹0</b><span>Total amount given</span></div>
+      <div class="stat"><b id="lO">0</b><span>Overdue</span></div>
+    </div>
+    <div class="bar">
+      <input id="lq" placeholder="Search name…">
+      <button class="gold" id="ladd">+ Add hand loan</button>
+      <button class="ghost" id="lexp">Export CSV</button>
+    </div>
+    <div class="wrap">
+      <table>
+        <thead><tr>
+          <th>S.No</th><th>Name</th><th>Amount</th><th>Rate of interest</th>
+          <th>Start date</th><th>End date</th><th>Interest</th><th>Total to pay</th><th>Remainder</th><th></th>
+        </tr></thead>
+        <tbody id="lrows"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<dialog id="dlg">
+  <h3 id="dt">Customer</h3>
+  <div class="grid">
+    <div class="full"><label>Full name *</label><input id="name"></div>
+    <div><label>Phone *</label><input id="phone" inputmode="tel"></div>
+    <div><label>Aadhaar / ID (optional)</label><input id="idno"></div>
+    <div class="full"><label>Address</label><input id="addr"></div>
+    <div><label>Sri Brunda Group</label><select id="bat"></select></div>
+    <div><label>Chit amount</label>
+      <select id="grp">
+        <option value="">Select group</option>
+        <option>1 Lakh</option><option>2 Lakhs</option><option>3 Lakhs</option>
+        <option>4 Lakhs</option><option>5 Lakhs</option><option>10 Lakhs</option><option>15 Lakhs</option>
+        <option>20 Lakhs</option><option>25 Lakhs</option>
+      </select>
+    </div>
+    <div><label>Join date</label><input id="join" type="date"></div>
+    <div><label>Chit value (₹)</label><input id="val" type="number" min="0"></div>
+    <div><label>Monthly installment (₹)</label><input id="mon" type="number" min="0"></div>
+    <div><label>Total months (set by group)</label><input id="tot" type="number" value="20" readonly></div>
+    <div><label>Months paid (from calendar)</label><input id="paid" readonly></div>
+    <div><label>Status</label>
+      <select id="st"><option>Active</option><option>Defaulter</option><option>Completed</option></select>
+    </div>
+    <div><label>Chit ends on (auto)</label><input id="endd" readonly></div>
+    <div><label>Chit lifted month (+1% of chit value from that month)</label><select id="lift"></select></div>
+    <div class="full"><label>Notes</label><textarea id="note" rows="2"></textarea></div>
+  </div>
+  <div class="actions">
+    <button class="ghost" id="cx">Cancel</button>
+    <button id="sv">Save</button>
+  </div>
+</dialog>
+
+<dialog id="ldlg">
+  <h3 id="ldt">Hand loan</h3>
+  <div class="grid">
+    <div class="full"><label>Name *</label><input id="lname"></div>
+    <div><label>Phone (for WhatsApp reminder)</label><input id="lphone" inputmode="tel"></div>
+    <div><label>Amount (₹) *</label><input id="lamt" type="number" min="0"></div>
+    <div><label>Rate of interest (% per month) *</label><input id="lrate" type="number" min="0" step="0.01"></div>
+    <div><label>Status</label>
+      <select id="lst"><option>Running</option><option>Closed</option></select>
+    </div>
+    <div><label>Start date *</label><input id="lstart" type="date"></div>
+    <div><label>End date *</label><input id="lend" type="date"></div>
+    <div class="full"><label>Notes</label><textarea id="lnote" rows="2"></textarea></div>
+  </div>
+  <div class="actions">
+    <button class="ghost" id="lcx">Cancel</button>
+    <button id="lsv">Save</button>
+  </div>
+</dialog>
+
+<dialog id="pdlg">
+  <h3 id="pt">Payments</h3>
+  <p class="sub" id="ps"></p>
+  <div id="cal" class="cal"></div>
+  <p class="hint">Tap a month to tick “payment done” (tap again to remove). 🔔 on an unpaid month sends a WhatsApp reminder; the 🔔 button in the Remind column lists all pending months. Choose 20, 24 or 30 months for this group.</p>
+  <div class="actions"><button class="gold" id="pbk">📖 Chit Book</button><button class="ghost" id="pcx">Close</button></div>
+</dialog>
+
+<dialog id="bdlg">
+  <h3 id="bt">Chit Book</h3>
+  <p class="sub" id="bs"></p>
+  <div class="paper" id="bpaper"><div class="books" id="bk"></div></div>
+  <div class="actions">
+    <button class="gold" id="bpr">🖨 Print</button>
+    <button class="ghost" id="bpay">Payments</button>
+    <button class="ghost" id="bcx">Close</button>
+  </div>
+</dialog>
+
+<dialog id="gdlg">
+  <h3>Sri Brunda Groups</h3>
+  <p class="sub">Tap a group to see its members and monthly payments.</p>
+  <div class="gcards" id="gcards"></div>
+  <div class="actions"><button class="ghost" id="gcx">Close</button></div>
+</dialog>
+
+<dialog id="gsdlg">
+  <h3 id="gst"></h3>
+  <p class="sub" id="gss"></p>
+  <div class="gbar"><label style="margin:0">Months</label><select id="gy"></select>
+    <button class="gold" id="gadd" style="margin-left:auto">+ Add customer</button></div>
+  <div class="wrap"><table class="gt" id="gtab"></table></div>
+  <p class="hint">Tap a month to tick “payment done” (tap again to remove). Months outside the 20-month chit show a dot.</p>
+  <div class="actions">
+    <button class="gold" id="gpr">🖨 Print</button>
+    <button class="ghost" id="gback">← All groups</button>
+    <button class="ghost" id="gscx">Close</button>
+  </div>
+</dialog>
+
+<dialog id="logdlg">
+  <h3>Sign in</h3>
+  <div class="grid">
+    <div class="full"><label>Username</label><input id="lguser" autocomplete="username"></div>
+    <div class="full"><label>Password</label><input id="lgpass" type="password" autocomplete="current-password"></div>
+  </div>
+  <p class="hint" id="lgerr" style="color:#b3261e"></p>
+  <div class="actions"><button id="lgbtn">Sign in</button></div>
+</dialog>
+
+<script src="{% static 'chits/scripts.js' %}"></script>
+</body>
+</html>
