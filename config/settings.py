@@ -2,8 +2,6 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-from django.core.exceptions import ImproperlyConfigured
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -16,7 +14,7 @@ def env_list(name, default=""):
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or ("dev-only-insecure-key-change-me" if DEBUG else "")
 if not SECRET_KEY:
-    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY when DJANGO_DEBUG=false")
+    raise ValueError("Set DJANGO_SECRET_KEY when DJANGO_DEBUG=false")
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 

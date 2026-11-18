@@ -51,3 +51,30 @@ class HandLoan(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self): return f"{self.name} - {self.amount}"
+
+
+class WeeklyLoan(models.Model):
+    """Loan repaid in equal weekly installments (simple interest: rate % per week on the principal)."""
+    STATUS = [("Running", "Running"), ("Closed", "Closed")]
+    name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=20, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    interest_rate_weekly = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    weeks = models.PositiveSmallIntegerField(default=10)
+    weekly_installment = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # (amount + interest) / weeks
+    start_date = models.DateField()  # week 1 is due 7 days after this date
+    status = models.CharField(max_length=10, choices=STATUS, default="Running")
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self): return f"{self.name} - {self.amount} ({self.weeks} weeks)"
+
+
+class WeeklyLoanPayment(models.Model):
+    loan = models.ForeignKey(WeeklyLoan, on_delete=models.CASCADE, related_name="payments")
+    week_no = models.PositiveSmallIntegerField()
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    paid_on = models.DateField()
+    class Meta:
+        ordering = ["week_no"]
+        constraints = [models.UniqueConstraint(fields=["loan", "week_no"], name="unique_weekly_loan_week")]
+    def __str__(self): return f"{self.loan_id} week {self.week_no}"

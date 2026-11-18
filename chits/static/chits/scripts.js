@@ -63,7 +63,7 @@ window.addEventListener("error", function (e) {
   }
   $("lgbtn").onclick = doLogin;
   $("lgpass").onkeydown = function (e) { if (e.key === "Enter") doLogin(); };
-  $("logout").onclick = function () { setTok("", ""); data = []; loans = []; render(); renderLoans(); showLogin(); };
+  $("logout").onclick = function () { setTok("", ""); data = []; loans = []; weekly = []; render(); renderLoans(); renderWeekly(); showLogin(); };
   // receipt number shown on WhatsApp receipts and the chit book; the server stores the same text
   function rcpt(c, n) { var id = String(c.id); while (id.length < 4) id = "0" + id; return "SBC-" + id + "-" + ("0" + n).slice(-2); }
   var need = ["add", "bak", "bat", "bcx", "bdlg", "bk", "bpaper", "bpay", "bpr", "bs", "bt", "cal", "cx", "dlg", "dt", "endd", "exp", "f", "file", "g", "gadd", "gback", "gbtn", "gcards", "gcx", "gdlg", "gpr", "grp", "gscx", "gsdlg", "gss", "gst", "gtab", "gy", "join", "lift", "mon", "paid", "pbk", "pcx", "pdlg", "ps", "pt", "q", "res", "rows", "sA", "sC", "sD", "sV", "sv", "tot", "val"];
@@ -88,24 +88,25 @@ window.addEventListener("error", function (e) {
   function init() {
     if (!TOK.a && !TOK.r) { showLogin(); return; }
     api("GET", "/api/app/bootstrap/").then(function (r) {
-      data = r.customers || []; loans = r.loans || []; GS = r.groupSettings || {};
-      migrate(); render(); renderLoans();
+      data = r.customers || []; loans = r.loans || []; weekly = r.weekly || []; GS = r.groupSettings || {};
+      migrate(); render(); renderLoans(); renderWeekly();
       offerImport();
     }).catch(function (e) { if (e.message !== "Please sign in") alert("Could not load data: " + e.message); });
   }
   // re-read everything from the server (used after a failed save so the screen never shows unsaved data)
   function reload() {
     return api("GET", "/api/app/bootstrap/").then(function (r) {
-      data = r.customers || []; loans = r.loans || []; GS = r.groupSettings || {};
-      migrate(); render(); renderLoans();
+      data = r.customers || []; loans = r.loans || []; weekly = r.weekly || []; GS = r.groupSettings || {};
+      migrate(); render(); renderLoans(); renderWeekly();
       if ($("pdlg").open && cur()) drawCal();
+      if ($("wpdlg").open && wcur()) drawWeekPay();
       if ($("gsdlg").open) drawSheet();
     });
   }
   function warnText(r) { return r && r.warnings && r.warnings.length ? "\n\nNotes:\n- " + r.warnings.slice(0, 8).join("\n- ") : ""; }
   // first run on the server: offer to move data that was saved in this browser by the old version
   function offerImport() {
-    if (data.length || loans.length) return;
+    if (data.length || loans.length || weekly.length) return;
     var cu = [], hl = [], gs = {};
     try { cu = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) {}
     try { hl = JSON.parse(localStorage.getItem("sriBrundaHandLoans")) || []; } catch (e) {}
@@ -682,13 +683,168 @@ window.addEventListener("error", function (e) {
     });
     download("sri-brunda-hand-loans.csv", [h.join(",")].concat(rows).join("\n"), "text/csv");
   };
-  // Customers / Hand Loans tabs
+
+  // ---------- weekly loans ----------
+  // simple interest: rate % per week on the principal for every week; installment = total / weeks
+  var weekly = [], weeklyEditId = null, weeklyPayId = null;
+  var wInterest = function (l) { return Math.round((+l.amount || 0) * (+l.rate || 0) / 100 * (+l.weeks || 0)); };
+  var wTotal = function (l) { return (+l.amount || 0) + wInterest(l); };
+  var wInst = function (l) { return (+l.weeks) > 0 ? Math.round(wTotal(l) / l.weeks) : 0; };
+  var wPaidCount = function (l) { return Object.keys(l.pay || {}).length; };
+  var wPaidAmt = function (l) { return Object.keys(l.pay || {}).reduce(function (a, k) { return a + (+l.pay[k].a || 0); }, 0); };
+  var wBalance = function (l) { return Math.max(0, wTotal(l) - wPaidAmt(l)); };
+  function wDue(l, w) { var d = isoDate(l.start); d.setDate(d.getDate() + 7 * w); return d; }
+  function wOverdueWeeks(l) {
+    var t = new Date(), out = []; t.setHours(0, 0, 0, 0);
+    if (l.status === "Closed") return out;
+    for (var w = 1; w <= l.weeks; w++) if (!(l.pay || {})[w] && wDue(l, w) < t) out.push(w);
+    return out;
+  }
+  function wNext(l) {
+    if (l.status === "Closed") return "<span class='pill Completed'>Closed</span>";
+    for (var w = 1; w <= l.weeks; w++) if (!(l.pay || {})[w]) {
+      var late = wDue(l, w) < new Date(new Date().setHours(0, 0, 0, 0));
+      return "<span class='" + (late ? "due" : "ok-t") + "'>Wk " + w + " · " + fmtIso(iso(wDue(l, w))) + "</span>";
+    }
+    return "<span class='ok-t'>All paid</span>";
+  }
+  var wById = function (id) { return weekly.filter(function (x) { return x.id === id; })[0]; };
+  var wcur = function () { return weeklyPayId && wById(weeklyPayId); };
+
+  function renderWeekly() {
+    var q = $("wq").value.toLowerCase();
+    var list = weekly.filter(function (l) { return !q || (l.name || "").toLowerCase().indexOf(q) > -1; });
+    var run = weekly.filter(function (l) { return l.status !== "Closed"; });
+    $("wC").textContent = run.length;
+    $("wA").textContent = inr(run.reduce(function (a, l) { return a + (+l.amount || 0); }, 0));
+    $("wB").textContent = inr(run.reduce(function (a, l) { return a + wBalance(l); }, 0));
+    $("wO").textContent = weekly.filter(function (l) { return wOverdueWeeks(l).length; }).length;
+    $("wrows").innerHTML = list.length ? list.map(function (l, i) {
+      var od = wOverdueWeeks(l).length;
+      return "<tr><td>" + (i + 1) + "</td><td><b>" + esc(l.name) + "</b></td><td>" + inr(l.amount) + "</td><td>" +
+        (+l.rate || 0) + "% / week</td><td>" + l.weeks + "</td><td>" + inr(wInst(l)) + "</td>" +
+        "<td><b>" + inr(wTotal(l)) + "</b></td><td>" + wPaidCount(l) + " / " + l.weeks + "</td>" +
+        "<td>" + inr(wBalance(l)) + "</td><td><span class='rem'>" + wNext(l) +
+        (od ? " <button class='sm warn' data-wr='" + esc(l.id) + "' title='Send overdue reminder on WhatsApp'>🔔</button>" : "") + "</span></td>" +
+        "<td><button class='sm gold' data-wp='" + esc(l.id) + "'>Payments</button> <button class='sm ghost' data-we='" + esc(l.id) + "'>Edit</button> <button class='sm ghost' data-wd='" + esc(l.id) + "'>Delete</button></td></tr>";
+    }).join("") : "<tr><td colspan='11' class='empty'>No weekly loans yet. Click “Add weekly loan”.</td></tr>";
+  }
+
+  var WF = { wname: "name", wphone: "phone", wamt: "amount", wrate: "rate", wweeks: "weeks", wstart: "start", wst: "status", wnote: "notes" };
+  function wPreview() {
+    var l = { amount: +$("wamt").value || 0, rate: +$("wrate").value || 0, weeks: +$("wweeks").value || 0 };
+    $("winst").value = l.weeks > 0 && l.amount ? inr(wInst(l)) + " × " + l.weeks + " weeks = " + inr(wTotal(l)) + " (interest " + inr(wInterest(l)) + ")" : "";
+  }
+  function openWeekly(l) {
+    l = l || { status: "Running", start: iso(new Date()), weeks: 10 };
+    weeklyEditId = l.id || null;
+    $("wdt").textContent = weeklyEditId ? "Edit weekly loan" : "Add weekly loan";
+    Object.keys(WF).forEach(function (k) { $(k).value = l[WF[k]] == null ? "" : l[WF[k]]; });
+    wPreview(); $("wdlg").showModal();
+  }
+  function saveWeekly() {
+    var o = {};
+    Object.keys(WF).forEach(function (k) { o[WF[k]] = $(k).value.trim(); });
+    o.amount = Number(o.amount) || 0; o.rate = Number(o.rate) || 0; o.weeks = parseInt(o.weeks, 10) || 0;
+    if (!o.name) { alert("Name is required."); return; }
+    if (!o.amount) { alert("Please enter the loan amount."); return; }
+    if (o.weeks < 1 || o.weeks > 200) { alert("Number of weeks must be between 1 and 200."); return; }
+    if (!o.start) { alert("Please enter the start date."); return; }
+    var id = weeklyEditId;
+    (id ? api("PUT", "/api/app/weekly/" + id + "/", o) : api("POST", "/api/app/weekly/", o))
+      .then(function (saved) {
+        if (id) weekly = weekly.map(function (l) { return l.id === id ? saved : l; }); else weekly.push(saved);
+        $("wdlg").close(); renderWeekly();
+        if ($("wpdlg").open && wcur()) drawWeekPay();
+      })
+      .catch(function (e) { if (e.message !== "Please sign in") alert("Could not save: " + e.message); });
+  }
+
+  function drawWeekPay() {
+    var l = wcur(); if (!l) return;
+    $("wpt").textContent = "Weekly payments – " + l.name;
+    $("wps").textContent = inr(l.amount) + " · " + l.weeks + " weeks × " + inr(wInst(l)) + " · Paid " + wPaidCount(l) + "/" + l.weeks + " · Balance " + inr(wBalance(l));
+    var t = new Date(), rows = ""; t.setHours(0, 0, 0, 0);
+    for (var w = 1; w <= l.weeks; w++) {
+      var p = (l.pay || {})[w], due = wDue(l, w), late = !p && due < t && l.status !== "Closed";
+      rows += "<tr><td>" + w + "</td><td>" + fmtIso(iso(due)) + "</td><td>" + inr(p ? p.a : wInst(l)) + "</td><td>" +
+        (p ? "<span class='ok-t'>Paid " + fmtIso(p.d) + "</span>" : late ? "<span class='due'>Overdue " + Math.round((t - due) / 864e5) + " d</span>" : "Pending") + "</td><td>" +
+        (p ? "<button class='sm ghost' data-wu='" + w + "'>Undo</button>" : "<button class='sm gold' data-wm='" + w + "'>Mark paid</button>") + "</td></tr>";
+    }
+    $("wpr").innerHTML = rows;
+  }
+  function openWeekPay(id) { weeklyPayId = id; drawWeekPay(); $("wpdlg").showModal(); }
+  function weekPaySave(w, remove) {
+    var l = wcur(); if (!l) return; var id = l.id;
+    var req = remove ? api("DELETE", "/api/app/weekly/" + id + "/payments/" + w + "/")
+                     : api("PUT", "/api/app/weekly/" + id + "/payments/" + w + "/", { d: iso(new Date()), a: wInst(l) });
+    req.then(function (r) {
+      l.pay = l.pay || {};
+      if (remove) delete l.pay[w]; else l.pay[w] = { d: r.d, a: r.a };
+      drawWeekPay(); renderWeekly();
+    }).catch(function (e) { if (e.message !== "Please sign in") alert("Could not save: " + e.message); reload(); });
+  }
+
+  function weeklyReminder(l) {
+    if (!l) return;
+    var ph = String(l.phone || "").replace(/\D/g, "").replace(/^0+/, "");
+    if (ph.length === 10) ph = "91" + ph;
+    if (ph.length < 10) { alert("Add a valid phone number for " + l.name + " (use Edit) to send a WhatsApp reminder."); return; }
+    var od = wOverdueWeeks(l);
+    if (!od.length) { alert("No overdue weeks for " + l.name + "."); return; }
+    var text =
+      "*Sri Brunda Chits*\n_Together Towards Prosperity_\n\n" +
+      "*PAYMENT REMINDER – WEEKLY LOAN*\n" +
+      "Dear " + l.name + ",\n" +
+      "Your weekly loan installment is overdue for " + od.length + " week" + (od.length === 1 ? "" : "s") + ":\n" +
+      od.map(function (w) { return "• Week " + w + " – due " + fmtIso(iso(wDue(l, w))); }).join("\n") + "\n\n" +
+      "Weekly installment: " + inr(wInst(l)) + "\n" +
+      "*Overdue amount: " + inr(od.length * wInst(l)) + "*\n" +
+      "Balance on the loan: " + inr(wBalance(l)) + "\n\n" +
+      "Kindly make the payment at the earliest. Please ignore this message if you have already paid.\nThank you 🙏";
+    window.open("https://wa.me/" + ph + "?text=" + encodeURIComponent(text), "_blank");
+  }
+
+  $("wrows").onclick = function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.wp) openWeekPay(b.dataset.wp);
+    if (b.dataset.we) openWeekly(wById(b.dataset.we));
+    if (b.dataset.wr) weeklyReminder(wById(b.dataset.wr));
+    if (b.dataset.wd && confirm("Delete this weekly loan and all its payments permanently?")) {
+      var xid = b.dataset.wd;
+      api("DELETE", "/api/app/weekly/" + xid + "/")
+        .then(function () { weekly = weekly.filter(function (l) { return l.id !== xid; }); renderWeekly(); })
+        .catch(function (e) { alert("Could not delete: " + e.message); });
+    }
+  };
+  $("wpr").onclick = function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.wm) weekPaySave(+b.dataset.wm, false);
+    if (b.dataset.wu && confirm("Remove the payment for week " + b.dataset.wu + "?")) weekPaySave(+b.dataset.wu, true);
+  };
+  $("wprm").onclick = function () { weeklyReminder(wcur()); };
+  $("wpcx").onclick = function () { $("wpdlg").close(); };
+  $("wadd").onclick = function () { openWeekly(); };
+  $("wcx").onclick = function () { $("wdlg").close(); };
+  $("wsv").onclick = saveWeekly;
+  $("wq").oninput = renderWeekly;
+  ["wamt", "wrate", "wweeks"].forEach(function (k) { $(k).oninput = wPreview; });
+  $("wexp").onclick = function () {
+    var h = ["name", "phone", "amount", "rate_per_week", "weeks", "weekly_installment", "total", "paid_weeks", "paid_amount", "balance", "start", "status", "notes"];
+    var rows = weekly.map(function (l) {
+      var v = [l.name, l.phone, l.amount, l.rate, l.weeks, wInst(l), wTotal(l), wPaidCount(l), wPaidAmt(l), wBalance(l), l.start, l.status, l.notes];
+      return v.map(function (x) { return '"' + String(x == null ? "" : x).replace(/"/g, '""') + '"'; }).join(",");
+    });
+    download("sri-brunda-weekly-loans.csv", [h.join(",")].concat(rows).join("\n"), "text/csv");
+  };
+  // Customers / Hand Loans / Weekly Loans tabs
   document.querySelector(".tabs").onclick = function (e) {
     var t = e.target.closest("[data-tab]"); if (!t) return;
-    var loan = t.dataset.tab === "loan";
-    $("custView").hidden = loan; $("loanView").hidden = !loan;
+    var tab = t.dataset.tab, loan = tab === "loan";
+    $("custView").hidden = tab !== "cust"; $("loanView").hidden = !loan; $("weeklyView").hidden = tab !== "weekly";
     [].forEach.call(document.querySelectorAll(".tab"), function (x) { x.classList.toggle("on", x === t); });
     if (loan) renderLoans();
+    if (tab === "weekly") renderWeekly();
   };
 
   // ---------- events ----------
@@ -737,7 +893,7 @@ window.addEventListener("error", function (e) {
 
   $("bak").onclick = function () {
     download("sri-brunda-backup-" + new Date().toISOString().slice(0, 10) + ".json",
-             JSON.stringify({ customers: data, handloans: loans, groupSettings: GS }, null, 2), "application/json");
+             JSON.stringify({ customers: data, handloans: loans, weeklyloans: weekly, groupSettings: GS }, null, 2), "application/json");
   };
   $("res").onclick = function () { $("file").click(); };
   $("file").onchange = function () {
@@ -745,12 +901,12 @@ window.addEventListener("error", function (e) {
     r.onload = function () {
       try {
         var d = JSON.parse(r.result);
-        var cu = Array.isArray(d) ? d : d && d.customers, hl = Array.isArray(d) ? null : d && d.handloans;
+        var cu = Array.isArray(d) ? d : d && d.customers, hl = Array.isArray(d) ? null : d && d.handloans, wl = Array.isArray(d) ? null : d && d.weeklyloans;
         if (!Array.isArray(cu)) throw 0;
-        if (confirm("Replace ALL data on the server with " + cu.length + " customers" + (Array.isArray(hl) ? " and " + hl.length + " hand loans" : "") + " from the backup?")) {
+        if (confirm("Replace ALL data on the server with " + cu.length + " customers" + (Array.isArray(hl) ? " and " + hl.length + " hand loans" : "") + (Array.isArray(wl) ? " and " + wl.length + " weekly loans" : "") + " from the backup?")) {
           var gs = (!Array.isArray(d) && d && d.groupSettings) || {};
-          api("POST", "/api/app/restore/", { customers: cu, handloans: Array.isArray(hl) ? hl : [], groupSettings: gs })
-            .then(function (r) { return reload().then(function () { alert("Restored " + r.customers + " customers and " + r.loans + " hand loans." + warnText(r)); }); })
+          api("POST", "/api/app/restore/", { customers: cu, handloans: Array.isArray(hl) ? hl : [], weeklyloans: Array.isArray(wl) ? wl : undefined, groupSettings: gs })
+            .then(function (r) { return reload().then(function () { alert("Restored " + r.customers + " customers, " + r.loans + " hand loans and " + (r.weekly || 0) + " weekly loans." + warnText(r)); }); })
             .catch(function (e) { alert("Restore failed: " + e.message); });
         }
       } catch (e) { alert("That file is not a valid backup."); }
@@ -765,6 +921,6 @@ window.addEventListener("error", function (e) {
     $("bat").innerHTML = '<option value="">Select group</option>' + o;
     $("g").innerHTML = '<option value="">All groups</option>' + o;
   })();
-  render(); renderLoans();
+  render(); renderLoans(); renderWeekly();
   init();
 })();

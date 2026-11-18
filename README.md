@@ -36,11 +36,19 @@ Django (chits/app_api.py)  → models in chits/models.py → db.sqlite3
 | Tick / untick a payment month | `ChitPayment` (receipt no. `SBC-0001-03`) |
 | Change group to 20/24/30 months | `ChitGroup.duration_months` (members' monthly = chit value ÷ months) |
 | Hand loans | `HandLoan` |
+| Weekly loans (new tab) | `WeeklyLoan` + `WeeklyLoanPayment` (one row per paid week) |
 | Backup / Restore buttons | whole database as JSON |
 
 Website endpoints (`/api/app/`): `bootstrap/`, `customers/`, `customers/<id>/`,
-`customers/<id>/payments/<month>/`, `groups/<name>/`, `loans/`, `loans/<id>/`, `backup/`, `restore/`.
+`customers/<id>/payments/<month>/`, `groups/<name>/`, `loans/`, `loans/<id>/`, `weekly/`, `weekly/<id>/`, `weekly/<id>/payments/<week>/`, `backup/`, `restore/`.
 The standard REST endpoints from the starter (`/api/customers/`, `/api/payments/`, ...) still work.
+
+## Weekly loans
+
+Open the **Weekly Loans** tab → **+ Add weekly loan**. Enter amount, interest **% per week**, number of weeks and start date.
+Simple interest = amount × rate% × weeks; weekly installment = (amount + interest) ÷ weeks (e.g. ₹10,000 at 2%/week for 10 weeks → ₹1,200 × 10).
+Week *n* is due `start date + 7 × n` days. Use **Payments** to mark each week paid/undo, and 🔔 for a WhatsApp reminder listing overdue weeks.
+Run `py manage.py migrate` once to create the new tables. Backups now include weekly loans; restoring an old backup without them leaves your weekly loans untouched.
 
 ## Moving old data
 

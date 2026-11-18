@@ -19,6 +19,7 @@
   <nav class="tabs">
     <button class="tab on" data-tab="cust">Customers</button>
     <button class="tab" data-tab="loan">Hand Loans</button>
+    <button class="tab" data-tab="weekly">Weekly Loans</button>
   </nav>
 
   <div id="custView">
@@ -54,6 +55,29 @@
     </table>
   </div>
   </div><!-- /custView -->
+
+  <div id="weeklyView" hidden>
+    <div class="stats">
+      <div class="stat"><b id="wC">0</b><span>Weekly loans (running)</span></div>
+      <div class="stat"><b id="wA">₹0</b><span>Total amount given</span></div>
+      <div class="stat"><b id="wB">₹0</b><span>Balance to collect</span></div>
+      <div class="stat"><b id="wO">0</b><span>With overdue weeks</span></div>
+    </div>
+    <div class="bar">
+      <input id="wq" placeholder="Search name…">
+      <button class="gold" id="wadd">+ Add weekly loan</button>
+      <button class="ghost" id="wexp">Export CSV</button>
+    </div>
+    <div class="wrap">
+      <table>
+        <thead><tr>
+          <th>S.No</th><th>Name</th><th>Amount</th><th>Interest / week</th><th>Weeks</th>
+          <th>Weekly installment</th><th>Total to pay</th><th>Paid</th><th>Balance</th><th>Next due</th><th></th>
+        </tr></thead>
+        <tbody id="wrows"></tbody>
+      </table>
+    </div>
+  </div><!-- /weeklyView -->
 
   <div id="loanView" hidden>
     <div class="stats">
@@ -130,6 +154,38 @@
     <button class="ghost" id="lcx">Cancel</button>
     <button id="lsv">Save</button>
   </div>
+</dialog>
+
+<dialog id="wdlg">
+  <h3 id="wdt">Weekly loan</h3>
+  <div class="grid">
+    <div class="full"><label>Name *</label><input id="wname"></div>
+    <div><label>Phone (for WhatsApp reminder)</label><input id="wphone" inputmode="tel"></div>
+    <div><label>Amount (₹) *</label><input id="wamt" type="number" min="0"></div>
+    <div><label>Interest (% per week) *</label><input id="wrate" type="number" min="0" step="0.01"></div>
+    <div><label>Number of weeks *</label><input id="wweeks" type="number" min="1" max="200" value="10"></div>
+    <div><label>Start date * (week 1 due 7 days later)</label><input id="wstart" type="date"></div>
+    <div><label>Status</label>
+      <select id="wst"><option>Running</option><option>Closed</option></select>
+    </div>
+    <div class="full"><label>Weekly installment (auto)</label><input id="winst" readonly></div>
+    <div class="full"><label>Notes</label><textarea id="wnote" rows="2"></textarea></div>
+  </div>
+  <div class="actions">
+    <button class="ghost" id="wcx">Cancel</button>
+    <button id="wsv">Save</button>
+  </div>
+</dialog>
+
+<dialog id="wpdlg">
+  <h3 id="wpt">Weekly payments</h3>
+  <p class="sub" id="wps"></p>
+  <div class="wrap"><table>
+    <thead><tr><th>Week</th><th>Due date</th><th>Installment</th><th>Status</th><th></th></tr></thead>
+    <tbody id="wpr"></tbody>
+  </table></div>
+  <p class="hint">Click “Mark paid” to record a week (today's date, installment amount). Click “Undo” to remove it. 🔔 sends a WhatsApp reminder listing the overdue weeks.</p>
+  <div class="actions"><button class="ghost" id="wprm">🔔 Remind overdue</button><button class="ghost" id="wpcx">Close</button></div>
 </dialog>
 
 <dialog id="pdlg">

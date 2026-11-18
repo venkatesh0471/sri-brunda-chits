@@ -14,13 +14,14 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import ChitGroup, ChitPayment, Customer, HandLoan
+from .models import ChitGroup, ChitPayment, Customer, HandLoan, WeeklyLoan, WeeklyLoanPayment
 
 GCOUNT = 26
 MONTH_OPTIONS = (20, 24, 30)
 UNASSIGNED = "Unassigned"          # only used for imported records that had no valid group
 CUSTOMER_STATUS = [s for s, _ in Customer.STATUS]
 LOAN_STATUS = [s for s, _ in HandLoan.STATUS]
+MAX_WEEKS = 200
 
 
 def bad(msg):
@@ -149,6 +150,38 @@ def clean_loan(d):
                 start_date=start, end_date=end, status=status, notes=s(d.get("notes"), 2000))
 
 
+def weekly_installment(amount, rate, weeks):
+    """(principal + simple interest of rate % per week for all weeks) / weeks, rounded to whole rupees."""
+    total = amount + amount * rate * weeks / Decimal(100)
+    return (total / weeks).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+
+def clean_weekly(d):
+    if not isinstance(d, dict):
+        raise bad("Invalid weekly loan data")
+    name = s(d.get("name"), 150)
+    if not name:
+        raise bad("Name is required")
+    amount = money(d.get("amount"), "Amount")
+    if amount <= 0:
+        raise bad("Loan amount must be greater than zero")
+    rate = money(d.get("rate"), "Rate of interest")
+    if rate >= Decimal("1000"):
+        raise bad("Rate of interest is too large")
+    try:
+        weeks = int(Decimal(str(d.get("weeks") or 0)))
+    except (InvalidOperation, ValueError):
+        weeks = 0
+    if not 1 <= weeks <= MAX_WEEKS:
+        raise bad(f"Number of weeks must be between 1 and {MAX_WEEKS}")
+    status = s(d.get("status"), 10) or "Running"
+    if status not in LOAN_STATUS:
+        raise bad("Invalid status")
+    return dict(name=name, phone=s(d.get("phone"), 20), amount=amount, interest_rate_weekly=rate, weeks=weeks,
+                weekly_installment=weekly_installment(amount, rate, weeks), start_date=to_date(d.get("start"), "Start date"),
+                status=status, notes=s(d.get("notes"), 2000))
+
+
 # ---------------------------------------------------------------- output shapes
 def customer_json(c):
     months = c.chit_group.duration_months
@@ -174,6 +207,19 @@ def loan_json(l):
     }
 
 
+def weekly_json(l):
+    return {
+        "id": str(l.pk), "name": l.name, "phone": l.phone, "amount": float(l.amount),
+        "rate": float(l.interest_rate_weekly), "weeks": l.weeks, "installment": float(l.weekly_installment),
+        "start": l.start_date.isoformat(), "status": l.status, "notes": l.notes,
+        "pay": {str(p.week_no): {"d": p.paid_on.isoformat(), "a": float(p.amount)} for p in l.payments.all()},
+    }
+
+
+def weekly_qs():
+    return WeeklyLoan.objects.prefetch_related("payments")
+
+
 def customers_qs():
     return Customer.objects.select_related("chit_group").prefetch_related("payments")
 
@@ -186,6 +232,7 @@ def snapshot():
     return {
         "customers": [customer_json(c) for c in customers_qs().order_by("name")],
         "loans": [loan_json(l) for l in HandLoan.objects.order_by("end_date")],
+        "weekly": [weekly_json(l) for l in weekly_qs().order_by("start_date", "id")],
         "groupSettings": group_settings(),
     }
 
@@ -297,12 +344,56 @@ class LoanDetail(APIView):
         return Response({"ok": True})
 
 
+def weekly_or_404(pk):
+    l = weekly_qs().filter(pk=pk).first()
+    if not l:
+        raise NotFound("Weekly loan not found")
+    return l
+
+
+class WeeklyCreate(APIView):
+    def post(self, request):
+        l = WeeklyLoan.objects.create(**clean_weekly(request.data))
+        return Response(weekly_json(weekly_or_404(l.pk)), status=201)
+
+
+class WeeklyDetail(APIView):
+    @transaction.atomic
+    def put(self, request, pk):
+        weekly_or_404(pk)
+        data = clean_weekly(request.data)
+        WeeklyLoan.objects.filter(pk=pk).update(**data)
+        WeeklyLoanPayment.objects.filter(loan_id=pk, week_no__gt=data["weeks"]).delete()  # weeks were reduced
+        return Response(weekly_json(weekly_or_404(pk)))
+
+    def delete(self, request, pk):
+        weekly_or_404(pk).delete()
+        return Response({"ok": True})
+
+
+class WeeklyPayment(APIView):
+    def put(self, request, pk, week):
+        l = weekly_or_404(pk)
+        if not 1 <= week <= l.weeks:
+            raise bad(f"Week must be between 1 and {l.weeks}")
+        body = request.data if isinstance(request.data, dict) else {}
+        day = to_date(body.get("d"), "Payment date") if s(body.get("d")) else timezone.localdate()
+        amount = money(body.get("a") if s(body.get("a")) else l.weekly_installment, "Amount")
+        WeeklyLoanPayment.objects.update_or_create(loan=l, week_no=week, defaults={"amount": amount, "paid_on": day})
+        return Response({"week": week, "d": day.isoformat(), "a": float(amount)})
+
+    def delete(self, request, pk, week):
+        weekly_or_404(pk)
+        WeeklyLoanPayment.objects.filter(loan_id=pk, week_no=week).delete()
+        return Response({"ok": True})
+
+
 class Backup(APIView):
     def get(self, request):
         ensure_groups()
         snap = snapshot()
         resp = Response({"version": 2, "exportedAt": timezone.now().isoformat(), "customers": snap["customers"],
-                         "handloans": snap["loans"], "groupSettings": snap["groupSettings"]})
+                         "handloans": snap["loans"], "weeklyloans": snap["weekly"], "groupSettings": snap["groupSettings"]})
         resp["Content-Disposition"] = 'attachment; filename="sri-brunda-backup-%s.json"' % timezone.localdate().isoformat()
         return resp
 
@@ -317,12 +408,13 @@ class Restore(APIView):
     def post(self, request):
         d = request.data
         if isinstance(d, list):
-            cu, hl, gs = d, [], {}
+            cu, hl, gs, wl = d, [], {}, None
         elif isinstance(d, dict):
             cu, hl, gs = d.get("customers"), d.get("handloans") or [], d.get("groupSettings") or {}
+            wl = d.get("weeklyloans")      # None = old backup without weekly loans -> keep the existing ones
         else:
-            cu = None
-        if not isinstance(cu, list) or not isinstance(hl, list) or not isinstance(gs, dict):
+            cu, wl = None, None
+        if not isinstance(cu, list) or not isinstance(hl, list) or not isinstance(gs, dict) or not (wl is None or isinstance(wl, list)):
             raise bad("That file is not a valid backup")
 
         ensure_groups()
@@ -380,4 +472,32 @@ class Restore(APIView):
                 loans += 1
             except ValidationError as e:
                 warnings.append("A hand loan was skipped: " + "; ".join(str(x) for x in e.detail))
-        return Response({"ok": True, "customers": made, "loans": loans, "warnings": warnings})
+
+        weekly = 0
+        if wl is not None:
+            WeeklyLoan.objects.all().delete()
+            for raw in wl:
+                try:
+                    loan = WeeklyLoan.objects.create(**clean_weekly(raw))
+                except ValidationError as e:
+                    warnings.append("A weekly loan was skipped: " + "; ".join(str(x) for x in e.detail))
+                    continue
+                weekly += 1
+                pay = raw.get("pay") if isinstance(raw.get("pay"), dict) else {}
+                rows = []
+                for w, p in pay.items():
+                    try:
+                        ww = int(w)
+                        p = p if isinstance(p, dict) else {}
+                        if not 1 <= ww <= loan.weeks:
+                            continue
+                        try:
+                            day = to_date(p.get("d"), "Payment date")
+                        except ValidationError:
+                            day = timezone.localdate()
+                        rows.append(WeeklyLoanPayment(loan=loan, week_no=ww, paid_on=day,
+                                                      amount=money(p.get("a") or loan.weekly_installment, "Amount")))
+                    except (ValueError, TypeError, ValidationError):
+                        continue
+                WeeklyLoanPayment.objects.bulk_create(rows)
+        return Response({"ok": True, "customers": made, "loans": loans, "weekly": weekly, "warnings": warnings})

@@ -9,6 +9,9 @@ urlpatterns = [
     path("groups/<str:name>/", v.GroupMonths.as_view()),
     path("loans/", v.LoanCreate.as_view()),
     path("loans/<int:pk>/", v.LoanDetail.as_view()),
+    path("weekly/", v.WeeklyCreate.as_view()),
+    path("weekly/<int:pk>/", v.WeeklyDetail.as_view()),
+    path("weekly/<int:pk>/payments/<int:week>/", v.WeeklyPayment.as_view()),
     path("backup/", v.Backup.as_view()),
     path("restore/", v.Restore.as_view()),
 ]
